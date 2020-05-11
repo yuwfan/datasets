@@ -19,6 +19,7 @@
 import enum
 import logging
 import os
+import hashlib
 
 from .checksums_utils import CHECKSUMS_FILE_NAME, get_size_checksum, load_sizes_checksums, store_sizes_checksum
 from .file_utils import cached_path, get_from_cache, url_to_filename
@@ -97,6 +98,13 @@ class DownloadManager(object):
     @property
     def manual_dir(self):
         return self._data_dir
+
+    @property
+    def downloaded_hash(self):
+        output_hash = hashlib.md5(
+            sum((sha256.encode("utf-8") for size, sha256 in self._recorded_sizes_checksums.values()), b"")
+        ).hexdigest()
+        return output_hash
 
     @property
     def downloaded_size(self):

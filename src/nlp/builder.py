@@ -360,6 +360,7 @@ class DatasetBuilder:
                 self._download_and_prepare(dl_manager=dl_manager, **download_and_prepare_kwargs)
 
                 self.info.download_size = dl_manager.downloaded_size
+                self.info.download_hash = dl_manager.downloaded_hash
                 self.info.write_to_directory(self._cache_dir)
 
         print(
