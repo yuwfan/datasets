@@ -48,7 +48,13 @@ METRICS_MODULE = "nlp.metrics"
 
 
 def import_main_class(module_path, dataset=True):
-    """ Load the module """
+    """ Load a module at module_path and import the main class from this module.
+        Args:
+            module_path (str): Absolute path of the module to import (e.g. 'nlp.datasets.squad')
+            dataset (bool): Is the module
+                a 'dataset' module (we'll import the 'DatasetBuilder' class), or
+                a 'metric' module (we'll import the 'Metric' class)
+        """
     importlib.invalidate_caches()
     module = importlib.import_module(module_path)
 
