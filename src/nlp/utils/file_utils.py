@@ -83,6 +83,14 @@ try:
 except (AttributeError, ImportError):
     HF_METRICS_CACHE = os.getenv(os.getenv("HF_METRICS_CACHE", default_metrics_cache_path))
 
+default_indexes_cache_path = os.path.join(hf_cache_home, "indexes")
+try:
+    from pathlib import Path
+
+    HF_INDEXES_CACHE = Path(os.getenv("HF_INDEXES_CACHE", default_indexes_cache_path))
+except (AttributeError, ImportError):
+    HF_INDEXES_CACHE = os.getenv(os.getenv("HF_INDEXES_CACHE", default_indexes_cache_path))
+
 S3_METRICS_BUCKET_PREFIX = "https://s3.amazonaws.com/datasets.huggingface.co/nlp/metrics"
 CLOUDFRONT_METRICS_DISTRIB_PREFIX = "https://cdn-datasets.huggingface.co/nlp/metric"
 
