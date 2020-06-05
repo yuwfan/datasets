@@ -2,7 +2,7 @@ import logging
 import math
 import os
 from time import time
-from typing import Dict, List, Tuple, Union, Callable, Optional
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -29,8 +29,12 @@ logger = logging.getLogger(__name__)
 
 
 class BaseEmbedModel:
-
-    def embed_documents(self, texts: List[str], titles: Optional[List[str]] = None, tokenizer: Optional[Callable[[str], List[str]]] = None) -> np.array:
+    def embed_documents(
+        self,
+        texts: List[str],
+        titles: Optional[List[str]] = None,
+        tokenizer: Optional[Callable[[str], List[str]]] = None,
+    ) -> np.array:
         raise NotImplementedError
 
     def embed_queries(self, queries: List[str], tokenizer: Optional[Callable[[str], List[str]]] = None) -> np.array:
@@ -175,17 +179,11 @@ class DenseIndexedDataset(BaseIndexedDataset):
 
     def _build_dense_index(self):
         st_time = time()
-        fp = np.memmap(
-            self.array_file_path, dtype="float32", mode="w+", shape=(self.dataset.num_rows, self.size)
-        )
+        fp = np.memmap(self.array_file_path, dtype="float32", mode="w+", shape=(self.dataset.num_rows, self.size))
         n_batches = math.ceil(self.dataset.num_rows / self.batch_size)
         for i in range(n_batches):
-            texts = [
-                p for p in self.dataset[i * self.batch_size : (i + 1) * self.batch_size]["text"]
-            ]
-            titles = [
-                p for p in self.dataset[i * self.batch_size : (i + 1) * self.batch_size]["title"]
-            ]
+            texts = [p for p in self.dataset[i * self.batch_size : (i + 1) * self.batch_size]["text"]]
+            titles = [p for p in self.dataset[i * self.batch_size : (i + 1) * self.batch_size]["title"]]
             reps = self.embed_model.embed_documents(texts, titles=titles, tokenizer=self.embed_tokenizer)
             fp[i * self.batch_size : (i + 1) * self.batch_size] = reps
             if i % 50 == 0:
@@ -196,9 +194,7 @@ class DenseIndexedDataset(BaseIndexedDataset):
     # load the numpy index into faiss
     # device is the index of the GPU, -1 for CPU
     def _load_dense_index(self, device=-1):
-        fp = np.memmap(
-            self.array_file_path, dtype="float32", mode="r", shape=(self.dataset.num_rows, self.size)
-        )
+        fp = np.memmap(self.array_file_path, dtype="float32", mode="r", shape=(self.dataset.num_rows, self.size))
         index_flat = faiss.IndexFlatIP(self.size)
         if device > -1:
             faiss_res = faiss.StandardGpuResources()
