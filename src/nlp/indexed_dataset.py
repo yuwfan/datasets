@@ -209,12 +209,12 @@ class DenseIndexedDataset(BaseIndexedDataset):
         fp.flush()
 
     # query the dense index either qith a text query or a pre-computed query vector
-    def query_index(self, query, k=10):
-        q_rep = self.embed_model.embed_queries([query], self.embed_tokenizer)
+    def query_index(self, query, k=10, q_rep: Optional[np.array] = None):
+        q_rep = self.embed_model.embed_queries([query], self.embed_tokenizer) if q_rep is None else q_rep
         scores, indices = self.faiss_index.search(q_rep, k)
-        return scores[0], indices[0]
+        return scores[0], indices[0].astype(int)
 
-    def query_index_batch(self, queries, k=10):
-        q_rep = self.embed_model.embed_queries(queries, self.embed_tokenizer)
+    def query_index_batch(self, queries, k=10, q_rep: Optional[np.array] = None):
+        q_rep = self.embed_model.embed_queries(queries, self.embed_tokenizer) if q_rep is None else q_rep
         scores, indices = self.faiss_index.search(q_rep, k)
-        return scores, indices
+        return scores, indices.astype(int)
