@@ -1,14 +1,15 @@
 import logging
-import math
 import os
-from time import time
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+from tqdm.auto import tqdm
 
 import numpy as np
 
-from .arrow_dataset import Dataset
 from .utils.file_utils import HF_INDEXES_CACHE
 
+
+if TYPE_CHECKING:
+    from .arrow_dataset import Dataset
 
 try:
     import elasticsearch as es
@@ -28,35 +29,20 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class BaseEmbedModel:
-    def embed_documents(
-        self,
-        texts: List[str],
-        titles: Optional[List[str]] = None,
-        tokenizer: Optional[Callable[[str], List[str]]] = None,
-    ) -> np.array:
-        raise NotImplementedError
-
-    def embed_queries(self, queries: List[str], tokenizer: Optional[Callable[[str], List[str]]] = None) -> np.array:
-        raise NotImplementedError
-
-
-class BaseIndexedDataset:
+class BaseEncodedDataset:
     def __init__(
         self,
-        dataset: Dataset,
+        dataset: "Dataset",
+        function: Callable[[dict, ], np.array],
         index_name: str,
-        embed_model: BaseEmbedModel,
         index_kwargs: Optional[dict] = None,
-        embed_tokenizer: Optional[Callable] = None,
+        size=768,
     ):
-        self.dataset = dataset  # an nlp dataset of snippets
+        self.dataset = dataset
+        self.function = function
         self.index_name = index_name
-        self.embed_model = embed_model  # a model that needs to have an embed_query and embed_documents method
-        # e.g. https://github.com/yjernite/transformers/blob/58e06cda0bf004ae84ab2381b1136814e0907c1d/examples/eli5/eli5_utils.py#L123
-        self.embed_tokenizer = embed_tokenizer
-        index_kwargs = index_kwargs if index_kwargs is not None else {}
-        self.init_index(**index_kwargs)
+        self.index_kwargs = index_kwargs if index_kwargs is not None else {}
+        self.size = size
 
     def __getitem__(self, key: Union[int, slice, str]) -> Union[Dict, List]:
         return self.dataset[key]
@@ -75,25 +61,39 @@ class BaseIndexedDataset:
             total_indices.append(indices)
         return total_scores, total_indices
 
-    # TODO: batch version of query_dense_index
-    #   https://github.com/yjernite/transformers/blob/58e06cda0bf004ae84ab2381b1136814e0907c1d/examples/eli5/eli5_utils.py#L530
+    def get_nearest(self, query, k: int = 10) -> Tuple[List[float], List[dict]]:
+        scores, indices = self.query_index(query, k)
+        return scores, [self.dataset[int(i)] for i in indices]
+
+    def get_nearest_batch(self, queries, k: int = 10) -> Tuple[List[List[float]], List[List[dict]]]:
+        total_scores, total_indices = self.query_index_batch(queries, k)
+        return total_scores, [[self.dataset[int(i)] for i in indices] for indices in total_indices]
 
 
-class SparseIndexedDataset(BaseIndexedDataset):
+class SparseEncodedDataset(BaseEncodedDataset):
+    def __init__(
+        self,
+        dataset: "Dataset",
+        function: Callable[[dict, ], np.array],
+        index_name: str,
+        index_kwargs: Optional[dict] = None,
+        size=768,
+    ):
+        super().__init__(dataset, function, index_name, index_kwargs, size)
+        self.init_index(**index_kwargs or {})
 
     # indexes snippets with ElasticSearch
     def init_index(self, es_client, **kwargs):
         assert (
             _has_elasticsearch
         ), "You must install ElasticSearch to use SparseIndexedDataset. To do so you can run `pip install elasticsearch`"
-        # Elasticsearch needs to be launched in another window, and a python client is declared withL
+        # Elasticsearch needs to be launched in another window, and a python client is declared with
         # > es_client = Elasticsearch([{'host': 'localhost', 'port': '9200'}])
         self.es_client = es_client
-        self._make_es_index_snippets()
-        # Here's the code for make_es_index_snippets:
-        #   https://github.com/yjernite/transformers/blob/58e06cda0bf004ae84ab2381b1136814e0907c1d/examples/eli5/eli5_utils.py#L34
+        if self.function is not None:
+            self._make_es_index()
 
-    def _make_es_index_snippets(self):
+    def _make_es_index(self):
         from tqdm.auto import tqdm
 
         es_client = self.es_client
@@ -119,7 +119,7 @@ class SparseIndexedDataset(BaseIndexedDataset):
 
         def passage_generator():
             for passage in passages_dset:
-                yield passage
+                yield self.function(passage)
 
         # create the ES index
         for ok, action in es.helpers.streaming_bulk(client=es_client, index=index_name, actions=passage_generator(),):
@@ -127,7 +127,6 @@ class SparseIndexedDataset(BaseIndexedDataset):
             successes += ok
         logger.info("Indexed %d documents" % (successes,))
 
-    # send query to the elastic_search client, and return list of snippets
     def query_index(self, query, k=10):
         response = self.es_client.search(
             index=self.index_name,
@@ -146,24 +145,19 @@ class SparseIndexedDataset(BaseIndexedDataset):
         return [hit["_score"] for hit in hits], [hit["_id"] for hit in hits]
 
 
-class DenseIndexedDataset(BaseIndexedDataset):
+class DenseEncodedDataset(BaseEncodedDataset):
     def __init__(
         self,
-        dataset: Dataset,
+        dataset: "Dataset",
+        function: Callable[[dict, ], np.array],
         index_name: str,
-        embed_model: BaseEmbedModel,
         index_kwargs: Optional[dict] = None,
-        embed_tokenizer: Optional[Callable] = None,
-        batch_size=16,
         size=768,
     ):
+        super().__init__(dataset, function, index_name, index_kwargs, size)
         self.array_file_path = os.path.join(HF_INDEXES_CACHE, index_name)
-        self.batch_size = batch_size
-        self.size = size
-        super().__init__(dataset, index_name, embed_model, index_kwargs, embed_tokenizer)
+        self.init_index(**index_kwargs or {})
 
-    # batch computes the snippet text representation with the model and add to memory-mapped numpy file
-    # Let's start with Numpy, then investigate how pyarrow Tensors would work
     def init_index(self, device=-1, **kwargs):
         assert (
             _has_faiss
@@ -178,22 +172,15 @@ class DenseIndexedDataset(BaseIndexedDataset):
         logger.info("Dense index '{}' loaded.".format(self.index_name))
 
     def _build_dense_index(self):
-        st_time = time()
+        assert self.function is not None
         fp = np.memmap(self.array_file_path, dtype="float32", mode="w+", shape=(self.dataset.num_rows, self.size))
-        n_batches = math.ceil(self.dataset.num_rows / self.batch_size)
-        for i in range(n_batches):
-            texts = [p for p in self.dataset[i * self.batch_size : (i + 1) * self.batch_size]["text"]]
-            titles = [p for p in self.dataset[i * self.batch_size : (i + 1) * self.batch_size]["title"]]
-            reps = self.embed_model.embed_documents(texts, titles=titles, tokenizer=self.embed_tokenizer)
-            fp[i * self.batch_size : (i + 1) * self.batch_size] = reps
-            if i % 50 == 0:
-                logger.info("Done writing batch={}/{},\ttime={:.2f}s".format(i + 1, n_batches, time() - st_time))
+        for i in tqdm(range(self.dataset.num_rows), total=self.dataset.num_rows):
+            fp[i] = self.function(self.dataset[i])
         fp.flush()
         del fp
 
-    # load the numpy index into faiss
-    # device is the index of the GPU, -1 for CPU
     def _load_dense_index(self, device=-1):
+        """Load the numpy index into faiss. `device` is the index of the GPU, -1 for CPU"""
         fp = np.memmap(self.array_file_path, dtype="float32", mode="r", shape=(self.dataset.num_rows, self.size))
         index_flat = faiss.IndexFlatIP(self.size)
         if device > -1:
@@ -204,13 +191,22 @@ class DenseIndexedDataset(BaseIndexedDataset):
         self.faiss_index.add(fp)
         fp.flush()
 
-    # query the dense index either qith a text query or a pre-computed query vector
-    def query_index(self, query, k=10, q_rep: Optional[np.array] = None):
-        q_rep = self.embed_model.embed_queries([query], self.embed_tokenizer) if q_rep is None else q_rep
-        scores, indices = self.faiss_index.search(q_rep, k)
+    def query_index(self, query: np.array, k=10):
+        assert len(query.shape) < 3
+        queries = query.reshape(1, -1)
+        assert queries.shape[1] == self.size
+        scores, indices = self.faiss_index.search(queries, k)
         return scores[0], indices[0].astype(int)
 
-    def query_index_batch(self, queries, k=10, q_rep: Optional[np.array] = None):
-        q_rep = self.embed_model.embed_queries(queries, self.embed_tokenizer) if q_rep is None else q_rep
-        scores, indices = self.faiss_index.search(q_rep, k)
+    def query_index_batch(self, queries: np.array, k=10):
+        assert len(queries.shape) == 2
+        assert queries.shape[1] == self.size
+        scores, indices = self.faiss_index.search(queries, k)
         return scores, indices.astype(int)
+
+    def save(self, index_name: str):
+        new_array_file_path = os.path.join(HF_INDEXES_CACHE, index_name)
+        os.rename(self.array_file_path, new_array_file_path)
+        self.index_name = index_name
+        self.array_file_path = new_array_file_path
+        logger.info("Dense index saved as {}".format(index_name))

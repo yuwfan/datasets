@@ -21,7 +21,8 @@ import logging
 import os
 from collections import defaultdict
 from collections.abc import Mapping
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Callable
+from tempfile import NamedTemporaryFile
 
 import numpy as np
 import pyarrow as pa
@@ -30,6 +31,7 @@ from tqdm import tqdm
 from nlp.utils.py_utils import dumps
 
 from .arrow_writer import ArrowWriter
+from .encoded_dataset import DenseEncodedDataset, SparseEncodedDataset, BaseEncodedDataset
 from .utils import convert_tuples_in_lists, map_nested
 
 
@@ -621,3 +623,18 @@ class Dataset(object):
 
         # return map function
         return self.map(map_function, batched=True, with_indices=with_indices, arrow_schema=arrow_schema, **kwargs)
+
+    def to_encoded_dataset(self, function: Callable[[dict, ], np.array], index_type="dense", index_kwargs=None, size=768) -> BaseEncodedDataset:
+        assert index_type in ["dense", "sparse"]
+        index_name = os.path.basename(NamedTemporaryFile().name)
+        if index_name == "sparse":
+            return SparseEncodedDataset(self, function, index_name, index_kwargs=index_kwargs, size=size)
+        else:
+            return DenseEncodedDataset(self, function, index_name, index_kwargs=index_kwargs, size=size)
+
+    def load_encoded_dataset(self, index_name: str, index_type="dense", index_kwargs=None, size=768) -> BaseEncodedDataset:
+        assert index_type in ["dense", "sparse"]
+        if index_name == "sparse":
+            return SparseEncodedDataset(self, None, index_name, index_kwargs=index_kwargs, size=size)
+        else:
+            return DenseEncodedDataset(self, None, index_name, index_kwargs=index_kwargs, size=size)
