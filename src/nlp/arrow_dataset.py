@@ -21,8 +21,7 @@ import logging
 import os
 from collections import defaultdict
 from collections.abc import Mapping
-from typing import Any, Dict, List, Optional, Union, Callable
-from tempfile import NamedTemporaryFile
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import pyarrow as pa
@@ -31,7 +30,7 @@ from tqdm import tqdm
 from nlp.utils.py_utils import dumps
 
 from .arrow_writer import ArrowWriter
-from .encoded_dataset import DenseEncodedDataset, SparseEncodedDataset, BaseEncodedDataset
+from .encoded_dataset import BaseEncodedDataset, DenseEncodedDataset, SparseEncodedDataset
 from .utils import convert_tuples_in_lists, map_nested
 
 
@@ -624,17 +623,18 @@ class Dataset(object):
         # return map function
         return self.map(map_function, batched=True, with_indices=with_indices, arrow_schema=arrow_schema, **kwargs)
 
-    def to_encoded_dataset(self, function: Callable[[dict, ], np.array], index_type="dense", index_kwargs=None, size=768) -> BaseEncodedDataset:
+    def to_encoded_dataset(
+        self, function: Callable[[dict,], np.array], index_type="dense", **kwargs
+    ) -> BaseEncodedDataset:
         assert index_type in ["dense", "sparse"]
-        index_name = os.path.basename(NamedTemporaryFile().name)
-        if index_name == "sparse":
-            return SparseEncodedDataset(self, function, index_name, index_kwargs=index_kwargs, size=size)
+        if index_type == "sparse":
+            return SparseEncodedDataset.build_from_dataset(self, function, **kwargs)
         else:
-            return DenseEncodedDataset(self, function, index_name, index_kwargs=index_kwargs, size=size)
+            return DenseEncodedDataset.build_from_dataset(self, function, **kwargs)
 
-    def load_encoded_dataset(self, index_name: str, index_type="dense", index_kwargs=None, size=768) -> BaseEncodedDataset:
+    def load_encoded_dataset(self, name: str, index_type="dense", **kwargs) -> BaseEncodedDataset:
         assert index_type in ["dense", "sparse"]
-        if index_name == "sparse":
-            return SparseEncodedDataset(self, None, index_name, index_kwargs=index_kwargs, size=size)
+        if name == "sparse":
+            return SparseEncodedDataset(self, index_name=name, **kwargs)
         else:
-            return DenseEncodedDataset(self, None, index_name, index_kwargs=index_kwargs, size=size)
+            return DenseEncodedDataset(self, encodings_filename=name, **kwargs)
