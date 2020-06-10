@@ -564,12 +564,12 @@ class Dataset(IndexableMixin):
 
         # Loop over single examples or batches and write to buffer/file if examples are to be updated
         if not batched:
-            for i, example in tqdm(enumerate(self)):
+            for i, example in tqdm(enumerate(self), total=len(self)):
                 example = apply_function_on_filtered_inputs(example, i)
                 if update_data:
                     writer.write(example)
         else:
-            for i in tqdm(range(0, len(self), batch_size)):
+            for i in tqdm(range(0, len(self), batch_size), total=len(range(0, len(self), batch_size))):
                 batch = self[i : i + batch_size]
                 indices = list(range(*(slice(i, i + batch_size).indices(self._data.num_rows))))  # Something simpler?
                 try:
@@ -774,14 +774,14 @@ class Dataset(IndexableMixin):
 
         # Loop over single examples or batches and write to buffer/file if examples are to be updated
         if not batched:
-            for i, example in tqdm(enumerate(self)):
+            for i, example in tqdm(enumerate(self), total=len(self)):
                 example = function(example, i) if with_indices else function(example)
                 embeddings[i] = example
                 # TODO(QUENTIN): use a writer with a certain batch size for flushing to speed up things
                 if is_memmaped:
                     embeddings.flush()
         else:
-            for i in tqdm(range(0, len(self), batch_size)):
+            for i in tqdm(range(0, len(self), batch_size), total=len(range(0, len(self), batch_size))):
                 batch = self[i : i + batch_size]
                 indices = list(range(*(slice(i, i + batch_size).indices(self._data.num_rows))))  # Something simpler?
                 batch = function(batch, indices) if with_indices else function(batch)
