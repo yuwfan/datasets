@@ -72,7 +72,7 @@ class Dataset(IndexableMixin):
         if with_embeddings:
             if emb_filename is None:
                 emb_filename = str(Path(filename).with_suffix(".npy"))
-            embeddings = np.memmap(self.array_file_path, dtype="float32", mode="r").reshape(pa_table.num_rows, -1)
+            embeddings = np.memmap(emb_filename, dtype="float32", mode="r").reshape(pa_table.num_rows, -1)
         return cls(arrow_table=pa_table, data_files=[{"filename": filename}], embeddings=embeddings)
 
     @classmethod
@@ -85,7 +85,7 @@ class Dataset(IndexableMixin):
         if with_embeddings:
             if emb_filename is None:
                 raise ValueError("Please specify a valid `emb_filename` as you set `with_embeddings=True`.")
-            embeddings = np.memmap(self.array_file_path, dtype="float32", mode="r").reshape(pa_table.num_rows, -1)
+            embeddings = np.memmap(emb_filename, dtype="float32", mode="r").reshape(pa_table.num_rows, -1)
         return cls(pa_table, embeddings=embeddings)
 
     @property
@@ -621,6 +621,7 @@ class Dataset(IndexableMixin):
             raise DatasetTransformationNotAllowedError(
                 "Using `.filter` on a dataset with attached embeddings is not allowed"
             )
+
         # transform the filter function into the map function
         def map_function(batch, *args):
             result = defaultdict(list)
@@ -806,11 +807,6 @@ class Dataset(IndexableMixin):
             raise Exception("Embeddings are not set, please call `add_embeddings` first.")
         return self._embeddings
 
-    def _indexable_example_generator(self):
-        """Implementation of IndexableMixin._indexable_example_generator function to be able to index texts"""
-
-        def generator():
-            for example in iter(self):
-                yield example
-
-        return generator
+    def _indexable_examples(self):
+        """Implementation of IndexableMixin._indexable_examples function to be able to index texts"""
+        return self

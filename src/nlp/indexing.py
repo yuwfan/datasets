@@ -1,7 +1,5 @@
 import logging
-import os
-from tempfile import NamedTemporaryFile
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -38,7 +36,7 @@ class IndexableMixin:
     def __getitem__(self, key):
         raise NotImplementedError
 
-    def _indexable_example_generator(self):
+    def _indexable_examples(self):
         raise NotImplementedError
 
     def _indexable_embeddings(self):
@@ -52,7 +50,7 @@ class IndexableMixin:
         assert index_type in ["dense", "sparse"]
         if index_type == "sparse":
             self._index = SparseIndex(**index_kwargs)
-            self._index.add_passages(self._indexable_example_generator())
+            self._index.add_passages(self._indexable_examples())
         else:
             self._index = DenseIndex(**index_kwargs)
             self._index.add_embeddings(self._indexable_embeddings())
@@ -100,7 +98,7 @@ class SparseIndex(BaseIndex):
             _has_elasticsearch
         ), "You must install ElasticSearch to use SparseIndexedDataset. To do so you can run `pip install elasticsearch`"
 
-    def add_passages(self, example_generator):
+    def add_passages(self, examples):
         # TODO: don't rebuild if it already exists
         index_name = self.index_name
         index_config = {
@@ -117,20 +115,22 @@ class SparseIndex(BaseIndex):
             },
         }
         self.es_client.indices.create(index=index_name, body=index_config)
-        number_of_docs, emb_size = embeddings.shape
+        number_of_docs = len(examples)
         progress = tqdm(unit="docs", total=number_of_docs)
         successes = 0
 
         def passage_generator():
             if self.column is not None:
-                for example in example_generator:
+                for example in examples:
                     yield example[self.column]
             else:
-                for example in example_generator:
+                for example in examples:
                     yield example
 
         # create the ES index
-        for ok, action in es.helpers.streaming_bulk(client=es_client, index=index_name, actions=passage_generator(),):
+        for ok, action in es.helpers.streaming_bulk(
+            client=self.es_client, index=index_name, actions=passage_generator(),
+        ):
             progress.update(1)
             successes += ok
         logger.info("Indexed %d documents" % (successes,))
@@ -165,7 +165,7 @@ class DenseIndex(BaseIndex):
         index_flat = faiss.IndexFlatIP(embeddings.shape[1])
         if self.device > -1:
             faiss_res = faiss.StandardGpuResources()
-            self.faiss_index = faiss.index_cpu_to_gpu(faiss_res, device, index_flat)
+            self.faiss_index = faiss.index_cpu_to_gpu(faiss_res, self.device, index_flat)
         else:
             self.faiss_index = index_flat
         self.faiss_index.add(embeddings)
@@ -181,10 +181,3 @@ class DenseIndex(BaseIndex):
         assert queries.shape[1] == self.size
         scores, indices = self.faiss_index.search(queries, k)
         return scores, indices.astype(int)
-
-    def save(self, encodings_filename: str):
-        new_array_file_path = os.path.join(HF_INDEXES_CACHE, encodings_filename)
-        os.rename(self.array_file_path, new_array_file_path)
-        self.encodings_filename = encodings_filename
-        self.array_file_path = new_array_file_path
-        logger.info("Dense index saved as {}".format(encodings_filename))
