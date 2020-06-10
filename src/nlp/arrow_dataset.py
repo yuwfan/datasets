@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import pyarrow as pa
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from nlp.utils.py_utils import dumps
 
