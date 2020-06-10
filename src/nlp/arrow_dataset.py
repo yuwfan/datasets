@@ -21,7 +21,8 @@ import logging
 import os
 from collections import defaultdict
 from collections.abc import Mapping
-from typing import Any, Dict, List, Optional, Union
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import pyarrow as pa
@@ -30,13 +31,18 @@ from tqdm import tqdm
 from nlp.utils.py_utils import dumps
 
 from .arrow_writer import ArrowWriter
+from .indexing import IndexableMixin
 from .utils import convert_tuples_in_lists, map_nested
 
 
 logger = logging.getLogger(__name__)
 
 
-class Dataset(object):
+class DatasetTransformationNotAllowedError(Exception):
+    pass
+
+
+class Dataset(IndexableMixin):
     """ A Dataset backed by an Arrow table or Record Batch.
     """
 
@@ -45,29 +51,42 @@ class Dataset(object):
         arrow_table: Union[pa.Table, pa.RecordBatch],
         data_files: Optional[List[dict]] = None,
         info: Optional[Any] = None,
+        embeddings: Optional[np.array] = None,
     ):
+        super().__init__()
         self._info = info
         self._data: pa.Table = arrow_table
         self._data_files: List[dict] = data_files if data_files is not None else []
+        self._embeddings = embeddings
         self._format_type = None
         self._format_columns = None
         self._output_all_columns = False
 
     @classmethod
-    def from_file(cls, filename: str):
+    def from_file(cls, filename: str, with_embeddings=False, emb_filename: Optional[str] = None):
         """ Instantiate a Dataset backed by an Arrow table at filename """
         mmap = pa.memory_map(filename)
         f = pa.ipc.open_stream(mmap)
         pa_table = f.read_all()
-        return cls(arrow_table=pa_table, data_files=[{"filename": filename}])
+        embeddings = None
+        if with_embeddings:
+            if emb_filename is None:
+                emb_filename = str(Path(filename).with_suffix(".npy"))
+            embeddings = np.memmap(self.array_file_path, dtype="float32", mode="r").reshape(pa_table.num_rows, -1)
+        return cls(arrow_table=pa_table, data_files=[{"filename": filename}], embeddings=embeddings)
 
     @classmethod
-    def from_buffer(cls, buffer: pa.Buffer):
+    def from_buffer(cls, buffer: pa.Buffer, with_embeddings=False, emb_filename: Optional[str] = None):
         """ Instantiate a Dataset backed by an Arrow buffer """
         mmap = pa.BufferReader(buffer)
         f = pa.ipc.open_stream(mmap)
         pa_table = f.read_all()
-        return cls(pa_table)
+        embeddings = None
+        if with_embeddings:
+            if emb_filename is None:
+                raise ValueError("Please specify a valid `emb_filename` as you set `with_embeddings=True`.")
+            embeddings = np.memmap(self.array_file_path, dtype="float32", mode="r").reshape(pa_table.num_rows, -1)
+        return cls(pa_table, embeddings=embeddings)
 
     @property
     def info(self):
@@ -370,8 +389,9 @@ class Dataset(object):
             os.remove(file_path)
         return len(files_to_remove)
 
-    def _get_cache_file_path(self, function, cache_kwargs):
+    def _get_cache_file_path(self, function, cache_kwargs, extension=".arrow"):
         """ Find a unique name from the filenames, kwargs and the function """
+        assert extension.startswith(".")
         if not self._data_files or "filename" not in self._data_files[0]:
             return None
         previous_files_string = "-".join(
@@ -382,7 +402,7 @@ class Dataset(object):
         output_hash = hashlib.md5(
             previous_files_string.encode("utf-8") + cache_kwargs_string.encode("utf-8") + function_bytes
         ).hexdigest()
-        cache_file_name = "cache-" + output_hash + ".arrow"
+        cache_file_name = "cache-" + output_hash + extension
         cache_directory = os.path.dirname(self._data_files[0]["filename"])
         cache_file_path = os.path.join(cache_directory, cache_file_name)
         return cache_file_path
@@ -441,7 +461,7 @@ class Dataset(object):
                 )
             )
 
-        # If we do batch computation but no batch sze is provided, default to the full dataset
+        # If we do batch computation but no batch size is provided, default to the full dataset
         if batched and (batch_size is None or batch_size <= 0):
             batch_size = self._data.num_rows
 
@@ -457,7 +477,7 @@ class Dataset(object):
                         type(processed_inputs)
                     )
                 )
-            elif isinstance(test_indices, list) and does_return_dict is True:
+            elif isinstance(indices, list) and does_return_dict is True:
                 all_dict_values_are_lists = all(isinstance(value, list) for value in processed_inputs.values())
                 if all_dict_values_are_lists is False:
                     raise TypeError(
@@ -474,7 +494,10 @@ class Dataset(object):
         test_indices = [0, 1] if batched else 0
         update_data = does_function_return_dict(test_inputs, test_indices)
 
-        def apply_function_on_filtered_inputs(inputs, indices):
+        class NumExamplesMismatch(Exception):
+            pass
+
+        def apply_function_on_filtered_inputs(inputs, indices, check_same_num_examples=False):
             """ Utility to apply the function on a selection of columns. """
             processed_inputs = function(inputs, indices) if with_indices else function(inputs)
             if not update_data:
@@ -488,6 +511,11 @@ class Dataset(object):
                     format_type=None,
                     format_columns=None,
                 )
+            if check_same_num_examples:
+                input_num_examples = len(inputs[next(iter(inputs.keys()))])
+                processed_inputs_num_examples = len(processed_inputs[next(iter(processed_inputs.keys()))])
+                if input_num_examples != processed_inputs_num_examples:
+                    raise NumExamplesMismatch()
             inputs.update(processed_inputs)
             return inputs
 
@@ -544,7 +572,14 @@ class Dataset(object):
             for i in tqdm(range(0, len(self), batch_size)):
                 batch = self[i : i + batch_size]
                 indices = list(range(*(slice(i, i + batch_size).indices(self._data.num_rows))))  # Something simpler?
-                batch = apply_function_on_filtered_inputs(batch, indices)
+                try:
+                    batch = apply_function_on_filtered_inputs(
+                        batch, indices, check_same_num_examples=self._embeddings is not None
+                    )
+                except NumExamplesMismatch:
+                    raise DatasetTransformationNotAllowedError(
+                        "Using `.map` in batched mode on a dataset with attached embeddings is allowed only if it doesn't create or remove existing examples"
+                    )
                 if update_data:
                     writer.write_batch(batch)
 
@@ -582,8 +617,11 @@ class Dataset(object):
                     Higher value gives smaller cache files, lower value consume less temporary memory while running `.map()`.
                 `disable_nullable` (`bool`, default: `True`): Allow null values in the table.
         """
-
-        # transforme the filter function into the map function
+        if self._embeddings is not None:
+            raise DatasetTransformationNotAllowedError(
+                "Using `.filter` on a dataset with attached embeddings is not allowed"
+            )
+        # transform the filter function into the map function
         def map_function(batch, *args):
             result = defaultdict(list)
             num_examples = len(batch[next(iter(batch.keys()))])
@@ -621,3 +659,158 @@ class Dataset(object):
 
         # return map function
         return self.map(map_function, batched=True, with_indices=with_indices, arrow_schema=arrow_schema, **kwargs)
+
+    def copy(self) -> "Dataset":
+        """
+        Return a copy of the Dataset object.
+        Note that this is a shallow copy, that doesn't recreate the arrow table nor the embeddings.
+        """
+        return Dataset(
+            arrow_table=self._data, data_files=self._data_files, info=self._info, embeddings=self._embeddings
+        )
+
+    def add_embeddings(
+        self,
+        function: Optional[Callable] = None,
+        with_indices: bool = False,
+        batched: bool = False,
+        batch_size: Optional[int] = 32,
+        keep_in_memory: bool = False,
+        load_from_cache_file: bool = True,
+        cache_file_name: Optional[str] = None,
+    ):
+        """ Apply a function to all the elements in the table (individually or in batches)
+            and update the table (if function does updated examples).
+
+            Args:
+                `function` (`callable`): with one of the following signature:
+                    - `function(example: Dict) -> np.ndarray` if `batched=False` and `with_indices=False`
+                    - `function(example: Dict, indices: int) -> np.ndarray` if `batched=False` and `with_indices=True`
+                    - `function(batch: Dict[List]) -> np.ndarray` if `batched=True` and `with_indices=False`
+                    - `function(batch: Dict[List], indices: List[int]) -> np.ndarray` if `batched=True` and `with_indices=True`
+                `with_indices` (`bool`, default: `False`): Provide example indices to `function`. Note that in this case the signature of `function` should be `def function(example, idx): ...`.
+                `batched` (`bool`, default: `False`): Provide batch of examples to `function`
+                `batch_size` (`Optional[int]`, default: `1000`): Number of examples per batch provided to `function` if `batched=True`
+                    `batch_size <= 0` or `batch_size == None`: Provide the full dataset as a single batch to `function`
+                `keep_in_memory` (`bool`, default: `False`): Keep the dataset in memory instead of writing it to a cache file.
+                `load_from_cache_file` (`bool`, default: `True`): If a cache file storing the current computation from `function`
+                    can be identified, use it instead of recomputing.
+                `cache_file_name` (`Optional[str]`, default: `None`): Provide the name of a cache file to use to store the
+                    results of the computation instead of the automatically generated cache file name.
+        """
+        # If the array is empty we do nothing
+        if len(self) == 0:
+            return self
+
+        # If the function to generate embeddings is not specified, try to load from cache
+        if function is None:
+            if load_from_cache_file and cache_file_name is not None:
+                logger.info("Loading cached embeddings at %s", cache_file_name)
+                output_dataset = self.copy()
+                emb = np.memmap(cache_file_name, dtype="float32", mode="r").reshape(output_dataset.num_rows, -1)
+                output_dataset._embeddings = emb
+                return output_dataset
+            else:
+                raise ValueError(
+                    "Please provide either a function to generate the embeddings, or use `load_from_cache_file=True` and specify `cache_file_name`."
+                )
+
+        # If we do batch computation but no batch sze is provided, default to the full dataset
+        if batched and (batch_size is None or batch_size <= 0):
+            batch_size = self._data.num_rows
+
+        # Check if the function returns updated examples
+        def check_function_return_array(inputs, indices):
+            """ Does the function returns a dict. """
+            processed_inputs = function(inputs, indices) if with_indices else function(inputs)
+            does_return_array = isinstance(processed_inputs, np.ndarray)
+            if not does_return_array:
+                raise TypeError(
+                    "Provided `function` which is applied to all elements of table returns a variable of type {}. Make sure provided `function` returns a variable of type `np.ndarray`.".format(
+                        type(processed_inputs)
+                    )
+                )
+
+        # Find the embeddings size
+        # Test it on the first element or a small batch (0, 1) for batched inputs
+        test_inputs = self[:2] if batched else self[0]
+        test_indices = [0, 1] if batched else 0
+        check_function_return_array(test_inputs, test_indices)
+        test_output = function(test_inputs, test_indices) if with_indices else function(test_inputs)
+        if not batched:
+            test_output = test_output.reshape(1, -1)
+        embeddings_size = test_output.shape[1]
+
+        # Check if we've already cached this computation (indexed by a hash)
+        if self._data_files:
+            if cache_file_name is None:
+                # we create a unique hash from the function, current dataset file and the mapping args
+                cache_kwargs = {
+                    "with_indices": with_indices,
+                    "batched": batched,
+                    "batch_size": batch_size,
+                    "keep_in_memory": keep_in_memory,
+                    "load_from_cache_file": load_from_cache_file,
+                    "cache_file_name": cache_file_name,
+                    "embeddings_size": embeddings_size,
+                }
+                cache_file_name = self._get_cache_file_path(function, cache_kwargs, extension=".npy")
+            if os.path.exists(cache_file_name) and load_from_cache_file:
+                logger.info("Loading cached embeddings at %s", cache_file_name)
+                output_dataset = self.copy()
+                emb = np.memmap(cache_file_name, dtype="float32", mode="r").reshape(output_dataset.num_rows, -1)
+                output_dataset._embeddings = emb
+                return output_dataset
+
+        # Prepare output buffer and batched writer in memory or on file if we update the table
+        if keep_in_memory or not self._data_files:
+            is_memmaped = False
+            embeddings = np.zeros(dtype="float32", shape=(self.num_rows, embeddings_size))
+        else:
+            logger.info("Caching embeddings at %s", cache_file_name)
+            is_memmaped = True
+            embeddings = np.memmap(cache_file_name, dtype="float32", mode="w+", shape=(self.num_rows, embeddings_size))
+
+        # Loop over single examples or batches and write to buffer/file if examples are to be updated
+        if not batched:
+            for i, example in tqdm(enumerate(self)):
+                example = function(example, i) if with_indices else function(example)
+                embeddings[i] = example
+                # TODO(QUENTIN): use a writer with a certain batch size for flushing to speed up things
+                if is_memmaped:
+                    embeddings.flush()
+        else:
+            for i in tqdm(range(0, len(self), batch_size)):
+                batch = self[i : i + batch_size]
+                indices = list(range(*(slice(i, i + batch_size).indices(self._data.num_rows))))  # Something simpler?
+                batch = function(batch, indices) if with_indices else function(batch)
+                embeddings[i : i + batch_size] = batch
+                if is_memmaped:
+                    embeddings.flush()
+
+        output_dataset = self.copy()
+        if is_memmaped:
+            del embeddings  # close the writer
+            embeddings = np.memmap(cache_file_name, dtype="float32", mode="r").reshape(output_dataset.num_rows, -1)
+        output_dataset._embeddings = embeddings
+        return output_dataset
+
+    def drop_embeddings(self) -> np.array:
+        embeddings = self._embeddings
+        self._embeddings = None
+        return embeddings
+
+    def _indexable_embeddings(self):
+        """Implementation of IndexableMixin._indexable_embeddings function to be able to index embeddings"""
+        if self._embeddings is None:
+            raise Exception("Embeddings are not set, please call `add_embeddings` first.")
+        return self._embeddings
+
+    def _indexable_example_generator(self):
+        """Implementation of IndexableMixin._indexable_example_generator function to be able to index texts"""
+
+        def generator():
+            for example in iter(self):
+                yield example
+
+        return generator
