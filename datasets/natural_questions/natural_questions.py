@@ -111,17 +111,26 @@ class NaturalQuestions(nlp.BeamBasedBuilder):
 
     def _split_generators(self, dl_manager, pipeline):
         """Returns SplitGenerators."""
-
-        files = dl_manager.download(_DOWNLOAD_URLS)
-        if not pipeline.is_local():
-            files = dl_manager.ship_files_with_pipeline(files, pipeline)
+        
+        def download_url(url, downloader, pipeline):
+            path = downloader.download_and_extract(url)
+            if not pipeline.is_local():
+                path = downloader.ship_files_with_pipeline(path, pipeline)
+            return path
+        
+        def get_downloaded_files_pcollection(split_name):
+            return pipeline \
+                | ("Create URLs for " + split_name) >> beam.Create(_DOWNLOAD_URLS[split_name]) \
+                | ("Download files for " + split_name) >> beam.Map(download_url, downloader=dl_manager, pipeline=pipeline)
 
         return [
-            nlp.SplitGenerator(name=nlp.Split.TRAIN, gen_kwargs={"filepaths": files["train"]},),
-            nlp.SplitGenerator(name=nlp.Split.VALIDATION, gen_kwargs={"filepaths": files["validation"]},),
+            nlp.SplitGenerator(name=nlp.Split.TRAIN, gen_kwargs={
+                "downloaded_files_pcollection": get_downloaded_files_pcollection("train")}),
+            nlp.SplitGenerator(name=nlp.Split.VALIDATION, gen_kwargs={
+                "downloaded_files_pcollection": get_downloaded_files_pcollection("validation")}),
         ]
 
-    def _build_pcollection(self, pipeline, filepaths):
+    def _build_pcollection(self, pipeline, downloaded_files_pcollection):
         """Build PCollection of examples."""
 
         def _parse_example(line):
@@ -180,4 +189,4 @@ class NaturalQuestions(nlp.BeamBasedBuilder):
                 },
             )
 
-        return pipeline | beam.Create(filepaths) | beam.io.ReadAllFromText() | beam.Map(_parse_example)
+        return downloaded_files_pcollection | beam.io.ReadAllFromText() | beam.Map(_parse_example)
