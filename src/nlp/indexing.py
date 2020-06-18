@@ -178,6 +178,5 @@ class DenseIndex(BaseIndex):
 
     def query_index_batch(self, queries: np.array, k=10):
         assert len(queries.shape) == 2
-        assert queries.shape[1] == self.size
         scores, indices = self.faiss_index.search(queries, k)
         return scores, indices.astype(int)
