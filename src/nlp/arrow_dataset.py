@@ -1232,7 +1232,7 @@ class Dataset(DatasetInfoMixin, IndexableMixin):
                     "cache_file_name": cache_file_name,
                     "writer_batch_size": writer_batch_size,
                 }
-                cache_file_name = self._get_cache_file_path(self.sort, cache_kwargs)
+                cache_file_name = self._get_cache_file_path(self.__class__.sort, cache_kwargs)
             if os.path.exists(cache_file_name) and load_from_cache_file:
                 if verbose:
                     logger.info("Loading cached sorted dataset at %s", cache_file_name)
@@ -1311,7 +1311,7 @@ class Dataset(DatasetInfoMixin, IndexableMixin):
                     "cache_file_name": cache_file_name,
                     "writer_batch_size": writer_batch_size,
                 }
-                cache_file_name = self._get_cache_file_path(self.shuffle, cache_kwargs)
+                cache_file_name = self._get_cache_file_path(self.__class__.shuffle, cache_kwargs)
             if os.path.exists(cache_file_name) and load_from_cache_file:
                 if verbose:
                     logger.info("Loading cached shuffled dataset at %s", cache_file_name)
@@ -1559,9 +1559,9 @@ class Dataset(DatasetInfoMixin, IndexableMixin):
                 test_kwargs["split"] = "test"
 
                 if train_cache_file_name is None:
-                    train_cache_file_name = self._get_cache_file_path(self.train_test_split, train_kwargs)
+                    train_cache_file_name = self._get_cache_file_path(self.__class__.train_test_split, train_kwargs)
                 if test_cache_file_name is None:
-                    test_cache_file_name = self._get_cache_file_path(self.train_test_split, test_kwargs)
+                    test_cache_file_name = self._get_cache_file_path(self.__class__.train_test_split, test_kwargs)
             if os.path.exists(train_cache_file_name) and os.path.exists(test_cache_file_name) and load_from_cache_file:
                 if verbose:
                     logger.info(
