@@ -118,6 +118,8 @@ class DatasetInfo:
     post_processing_size: Optional[int] = None
     dataset_size: Optional[int] = None
     size_in_bytes: Optional[int] = None
+    # Updated during post-processing
+    hash: Optional[str] = field(default_factory=str)
 
     def __post_init__(self):
         # Convert back to the correct classes when we reload from dict

@@ -134,6 +134,7 @@ class ArrowWriter(object):
         disable_nullable: bool = False,
         update_features: bool = False,
         with_metadata: bool = True,
+        hash: Optional[str] = None,
     ):
         if path is None and stream is None:
             raise ValueError("At least one of path and stream must be provided.")
@@ -160,6 +161,7 @@ class ArrowWriter(object):
         self.writer_batch_size = writer_batch_size or DEFAULT_MAX_BATCH_SIZE
         self.update_features = update_features
         self.with_metadata = with_metadata
+        self.hash = "" if hash is None else hash
 
         self._num_examples = 0
         self._num_bytes = 0
@@ -184,7 +186,7 @@ class ArrowWriter(object):
         if self.disable_nullable:
             self._schema = pa.schema(pa.field(field.name, field.type, nullable=False) for field in self._schema)
         if self.with_metadata:
-            self._schema = self._schema.with_metadata(self._build_metadata(DatasetInfo(features=self._features)))
+            self._schema = self._schema.with_metadata(self._build_metadata(DatasetInfo(features=self._features, hash=self.hash)))
         self.pa_writer = pa.RecordBatchStreamWriter(self.stream, self._schema)
 
     @property
