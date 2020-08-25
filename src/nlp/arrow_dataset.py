@@ -37,9 +37,10 @@ from tqdm.auto import tqdm
 from nlp.utils.py_utils import dumps
 
 from .arrow_writer import ArrowWriter, TypedSequence
+from .arrow_reader import ArrowReader
 from .features import Features, cast_to_python_objects, pandas_types_mapper
 from .info import DatasetInfo
-from .search import IndexableMixin
+from .search import IndexableMixin, BaseIndex
 from .splits import NamedSplit
 from .utils import map_nested
 
@@ -136,10 +137,11 @@ class Dataset(DatasetInfoMixin, IndexableMixin):
         data_files: Optional[List[dict]] = None,
         info: Optional[DatasetInfo] = None,
         split: Optional[NamedSplit] = None,
+        indexes: Optional[Dict[str, BaseIndex]] = None
     ):
         info = info.copy() if info is not None else DatasetInfo()
         DatasetInfoMixin.__init__(self, info=info, split=split)
-        IndexableMixin.__init__(self)
+        IndexableMixin.__init__(self, indexes=indexes)
         self._data: pa.Table = arrow_table
         self._data_files: List[dict] = data_files if data_files is not None else []
         self._format_type: Optional[str] = None
@@ -167,13 +169,20 @@ class Dataset(DatasetInfoMixin, IndexableMixin):
 
     @classmethod
     def from_file(
-        cls, filename: str, info: Optional[DatasetInfo] = None, split: Optional[NamedSplit] = None
+        cls, filename: str, info: Optional[DatasetInfo] = None, split: Optional[NamedSplit] = None, indexes: Optional[Dict[str, BaseIndex]]
     ) -> "Dataset":
         """ Instantiate a Dataset backed by an Arrow table at filename """
-        mmap = pa.memory_map(filename)
-        f = pa.ipc.open_stream(mmap)
-        pa_table = f.read_all()
-        return cls(arrow_table=pa_table, data_files=[{"filename": filename}], info=info, split=split)
+        return cls.from_files(filenames=[filename], info=info, split=split, indexes=indexes)
+
+    @classmethod
+    def from_files(
+        cls, filenames: Union[List[Union[str, dict]]], info: Optional[DatasetInfo] = None, split: Optional[NamedSplit] = None, indexes: Optional[Dict[str, BaseIndex]]
+    ) -> "Dataset":
+        """ Instantiate a Dataset backed by an Arrow table from different files """
+        filenames = [{"filename": f} if isinstance(f, str) else f for f in filenames]
+        dataset_kwargs = ArrowReader("", info).read_files(filenames, split)
+        dataset_kwargs["indexes"] = indexes
+        return cls(**dataset_kwargs)
 
     @classmethod
     def from_buffer(
@@ -264,6 +273,9 @@ class Dataset(DatasetInfoMixin, IndexableMixin):
         }
         pa_table: pa.Table = pa.Table.from_pydict(mapping=mapping)
         return cls(pa_table, info=info, split=split)
+
+    def __reduce__(self):
+        return (self.__class__.from_files, (self._data_files, self.info, self.split))
 
     @property
     def data(self) -> pa.Table:

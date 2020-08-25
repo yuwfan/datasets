@@ -331,8 +331,8 @@ class FaissIndex(BaseIndex):
 class IndexableMixin:
     """Add indexing features to `nlp.Dataset`"""
 
-    def __init__(self):
-        self._indexes: Dict[str, BaseIndex] = {}
+    def __init__(self, indexes: Optional[Dict[str, BaseIndex]] = None):
+        self._indexes: Dict[str, BaseIndex] = indexes if indexes is not None else {}
 
     def __len__(self):
         raise NotImplementedError
