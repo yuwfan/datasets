@@ -102,8 +102,12 @@ class DatasetInfoMixin(object):
         return self._info.features
 
     @property
-    def hash(self) -> str:
-        return self._info.hash
+    def current_hash(self) -> str:
+        return self._info.current_hash
+
+    @property
+    def parents_hash(self) -> str:
+        return self._info.parents_hash
 
     @property
     def homepage(self) -> Optional[str]:
