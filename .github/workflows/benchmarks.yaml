@@ -17,6 +17,7 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Your ML workflow goes here
+          python -c "import nlp; print("nlp version:\t", nlp.__version__)"
           dvc repro --force
 
           git fetch --prune
