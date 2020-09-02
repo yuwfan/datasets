@@ -10,10 +10,10 @@ jobs:
         run: |
           pip3 install --upgrade pip
           pip3 install --upgrade setuptools wheel
-          pip3 install -e .[benchmarks]
+          pip3 install -e .[benchmarks] --use-feature=2020-resolver
       - name: cml_run
         env:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Your ML workflow goes here
-          python3 -c "import torch; print('torch version:\t', torch.__version__)"
+          python -c "import nlp; print('nlp version:\t', nlp.__version__)"
