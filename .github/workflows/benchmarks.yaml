@@ -16,4 +16,4 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Your ML workflow goes here
-          python -c "import nlp; print('nlp version:\t', nlp.__version__)"
+          python3 -c "import nlp; print('nlp version:\t', nlp.__version__)"
