@@ -6,20 +6,17 @@ jobs:
     container: docker://dvcorg/cml-py3:latest
     steps:
       - uses: actions/checkout@v2
+      - name: install packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade setuptools wheel
+          python -m pip install -e .[benchmarks]
+          python -m pip install pyarrow==0.17.1
       - name: cml_run
         env:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Your ML workflow goes here
-
-          pip install --upgrade pip
-          pip install setuptools wheel
-          pip install -e .[benchmarks]
-          pip install -e .
-
-          # pyarrow==0.17.1
-          pip install pyarrow==0.17.1
-
           dvc repro --force
 
           git fetch --prune
