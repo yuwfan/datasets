@@ -1,0 +1,11 @@
+{
+    "predictions": ["The dog bit the man.", "It wasn't surprising.", "The man had just bitten him."],
+    "references": [["The dog bit the man.", "The dog had bit the man."], ["It was not unexpected.", "No one was surprised."], ["The man bit him first.", "The man had bitten the dog."]],
+    "smooth_method": "exp",
+    "smooth_value": null,
+    "force": false,
+    "lowercase": false,
+    "tokenize": "13a", 
+    "use_effective_order": false,
+    "__score": {"score": 48.530827009929865, "counts": [14, 7, 5, 3], "totals": [17, 14, 11, 8], "precisions": [82.3529411764706, 50.0, 45.45454545454545, 37.5], "bp": 0.9428731438548749, "sys_len": 17, "ref_len": 18}
+}

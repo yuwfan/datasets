@@ -82,7 +82,7 @@ class Sacrebleu(nlp.Metric):
                 smooth_value=None,
                 force=False,
                 lowercase=False,
-                tokenize=scb.DEFAULT_TOKENIZER,
+                tokenize='13a',  # scb.DEFAULT_TOKENIZER, but we hardcode the value for reproducibility
                 use_effective_order=False):
         references_per_prediction = len(references[0])
         if any(len(refs) != references_per_prediction for refs in references):
