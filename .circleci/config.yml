@@ -1,4 +1,7 @@
-version: 2
+version: 2.1
+
+orbs:
+    win: circleci/windows@2.2.0
 
 jobs:
     run_dataset_script_tests_pyarrow_0p17:
@@ -29,15 +32,15 @@ jobs:
 
     run_dataset_script_tests_pyarrow_1_WIN:
         working_directory: ~/datasets
-        docker:
-            - image: winamd64/python:3.6
-        resource_class: medium
+        executor:
+          name: win/default
+          shell: powershell
         steps:
           - run: $(echo hello | Out-Host; $?) -and $(echo world | Out-Host; $?)
           - run: python -c "import sys; print(sys.version)"
           - run: pip install virtualenv
-          - run: python -m venv venv
-          - run: source venv/bin/activate
+          - run: python -m virtualenv venv
+          - run: venv/bin/activate.ps1
           - run: pip install .[tests]
           - run: pip install pyarrow==1.0.0
           - run: HF_SCRIPTS_VERSION=master python -m pytest -sv ./tests/
