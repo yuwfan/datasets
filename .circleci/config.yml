@@ -36,7 +36,8 @@ jobs:
           shell: powershell
         steps:
           - run: $(echo hello | Out-Host; $?) -and $(echo world | Out-Host; $?)
-          - run: python -c "import sys; print('sys.version')"
+          - run: python -c "import sys; print(sys.version)"
+          - run: pip install virtualenv
           - run: python -m venv venv
           - run: source venv/bin/activate
           - run: pip install .[tests]
