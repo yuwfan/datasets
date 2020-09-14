@@ -1,7 +1,4 @@
-version: 2.1
-
-orbs:
-    win: circleci/windows@2.2.0
+version: 2
 
 jobs:
     run_dataset_script_tests_pyarrow_0p17:
@@ -31,11 +28,10 @@ jobs:
             - run: HF_SCRIPTS_VERSION=master python -m pytest -sv ./tests/
 
     run_dataset_script_tests_pyarrow_1_WIN:
-        executor:
-          name: win/default
-          shell: powershell
+        working_directory: ~/datasets
         docker:
             - image: winamd64/python:3.6
+        resource_class: medium
         steps:
           - run: $(echo hello | Out-Host; $?) -and $(echo world | Out-Host; $?)
           - run: python -c "import sys; print(sys.version)"
