@@ -41,7 +41,7 @@ jobs:
             - run: conda install pytorch tensorflow --yes
             - run: pip install virtualenv
             - run: python -m virtualenv venv --system-site-packages
-            - run: & venv/Scripts/activate.ps1
+            - run: "& venv/Scripts/activate.ps1"
             - run: pip install .[tests]
             - run: pip install pyarrow==1.0.0
             - run: $env:HF_SCRIPTS_VERSION="master"
