@@ -69,7 +69,9 @@ REQUIRED_PKGS = [
     # For smart caching dataset processing
     'dill',
     # For performance gains with apache arrow
-    'pandas',
+    # 1.1.3 introduced permission errors on windows, see 
+    # https://app.circleci.com/pipelines/github/huggingface/datasets/233/workflows/f9eab422-46ff-4fbf-a690-dbb52d04beb0
+    'pandas<1.1.3',
     # for downloading datasets over HTTPS
     'requests>=2.19.0',
     # progress bars in download and scripts
