@@ -91,10 +91,6 @@ class MetricInfoMixin(object):
         return self._metric_info.citation
 
     @property
-    def output_names(self) -> Optional[List[str]]:
-        return self._metric_info.output_names
-
-    @property
     def features(self) -> Features:
         return self._metric_info.features
 
@@ -117,6 +113,10 @@ class MetricInfoMixin(object):
     @property
     def reference_urls(self) -> Optional[List[str]]:
         return self._metric_info.reference_urls
+
+    @property
+    def output_names(self) -> Optional[List[str]]:
+        return self._metric_info.output_names
 
     @property
     def streamable(self) -> bool:
@@ -392,33 +392,48 @@ class Metric(MetricInfoMixin):
 
         self.cache_file_name = None
         self.filelock = None
+        self.rendez_vous_lock = None
 
         if self.process_id == 0:
-            self.data.set_format(type=self.info.format)
-
+            # hack to not call self.data.set_format that can't be transformed by tensorflow:AutoGraph
+            self.data._format_type = self.info.format
             predictions = self.data["predictions"]
             references = self.data["references"]
             with temp_seed(self.seed):
                 output = self._compute(predictions=predictions, references=references, **kwargs)
-
-            if self.buf_writer is not None:
-                self.buf_writer = None
-                del self.data
-                self.data = None
-            else:
-                # Release locks and delete all the cache files
-                for filelock, file_path in zip(self.filelocks, self.file_paths):
-                    logger.info(f"Removing {file_path}")
-                    del self.data
-                    self.data = None
-                    del self.writer
-                    self.writer = None
-                    os.remove(file_path)
-                    filelock.release()
-
+            self._cleanup_cache_files_for_all_processes()
             return output
         else:
             return None
+
+    def reset(self):
+        """Reset the metric state"""
+        if self.writer is not None:
+            self._finalize()
+            self.cache_file_name = None
+            self.filelock = None
+            self.rendez_vous_lock = None
+
+            if self.process_id == 0:
+                self._cleanup_files()
+
+    def _cleanup_cache_files_for_all_processes(self, release_filelocks=True):
+        """Is called by process 0 to cleanup lock files and data files inside .compute() and .reset()"""
+        del self.data
+        self.data = None
+        if self.buf_writer is not None:
+            self.buf_writer = None
+        else:
+            del self.writer
+            self.writer = None
+            # Release locks and delete all the cache files
+            for filelock, file_path in zip(self.filelocks, self.file_paths):
+                logger.info(f"Removing {file_path}")
+                os.remove(file_path)
+                if release_filelocks:
+                    filelock.release()
+            self.filelocks = None
+            self.file_paths = None
 
     def add_batch(self, *, predictions=None, references=None):
         """
