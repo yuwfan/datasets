@@ -49,6 +49,10 @@ from .utils import *
 from .utils.tqdm_utils import disable_progress_bar
 
 
+if is_tf_available():
+    from .metric_keras import KerasMetric, convert_metric_to_keras
+
+
 if int(pyarrow.__version__.split(".")[1]) < 16 and int(pyarrow.__version__.split(".")[0]) == 0:
     raise ImportWarning(
         "To use `datasets`, the module `pyarrow>=0.16.0` is required, and the current version of `pyarrow` doesn't match this condition.\n"

@@ -22,7 +22,7 @@ from absl.testing import parameterized
 
 from datasets import DownloadConfig, hf_api, load_metric
 
-from .utils import local, remote, slow
+from .utils import local, remote, require_tf, slow
 
 
 def get_local_metric_names():
@@ -58,6 +58,25 @@ class RemoteMetricTest(parameterized.TestCase):
             self.assertTrue("predictions" in parameters)
             self.assertTrue("references" in parameters)
             self.assertTrue(all([p.kind != p.VAR_KEYWORD for p in parameters.values()]))  # no **kwargs
+            del metric
+
+    @slow
+    @require_tf
+    def test_load_real_keras_metric(self, metric_name):
+        from datasets import convert_metric_to_keras
+
+        with tempfile.TemporaryDirectory() as temp_data_dir:
+            download_config = DownloadConfig()
+            download_config.force_download = True
+            config_name = None
+            if metric_name == "glue":
+                config_name = "sst2"
+            metric = load_metric(
+                metric_name, config_name=config_name, data_dir=temp_data_dir, download_config=download_config
+            )
+            keras_metrics = convert_metric_to_keras(metric)
+            self.assertTrue(len(keras_metrics) > 0)
+            del keras_metrics, metric
 
 
 @parameterized.named_parameters(get_local_metric_names())
@@ -82,3 +101,21 @@ class LocalMetricTest(parameterized.TestCase):
             self.assertTrue("references" in parameters)
             self.assertTrue(all([p.kind != p.VAR_KEYWORD for p in parameters.values()]))  # no **kwargs
             del metric
+
+    @slow
+    @require_tf
+    def test_load_real_keras_metric(self, metric_name):
+        from datasets import convert_metric_to_keras
+
+        with tempfile.TemporaryDirectory() as temp_data_dir:
+            download_config = DownloadConfig()
+            download_config.force_download = True
+            config_name = None
+            if metric_name == "glue":
+                config_name = "sst2"
+            metric = load_metric(
+                metric_name, config_name=config_name, data_dir=temp_data_dir, download_config=download_config
+            )
+            keras_metrics = convert_metric_to_keras(metric)
+            self.assertTrue(len(keras_metrics) > 0)
+            del keras_metrics, metric
